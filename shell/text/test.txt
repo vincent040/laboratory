@@ -1,0 +1,3 @@
+this is a testing string.
+$22 appppple, $33 pineapple, and strawberry $88
+$99

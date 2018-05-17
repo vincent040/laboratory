@@ -1,0 +1,35 @@
+#!/bin/bash
+
+if [ $# -eq 0 ]
+then
+	vi
+	exit
+fi
+
+if [ $# -ge 2 ]
+then
+	echo "参数太多了！"
+	exit
+fi
+
+
+if [ -e $1 ] # 文件已存在，一律直接打开不作任何处理
+then
+	vi $1
+	exit
+else
+	suffix=`echo "$1" | sed 's/^.*\./\./'`
+
+	# 如果是C语言程序，搞个模板开始编辑
+	if [ $suffix = ".c" ]
+	then
+		cp /bin/sample.c $1
+		vi $1 +15
+		exit
+
+	# 否则，直接编辑空文件
+	else
+		vi $1
+		exit
+	fi
+fi
