@@ -1,82 +1,108 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <errno.h>
-#include <string.h>
+#include "head.h"
 
-#include <linux/fb.h>
-#include <linux/videodev2.h>
-#include <linux/input.h>
-#include <sys/ioctl.h>
+#define SCREENSIZE 800*480*4
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/mman.h>
-#include <fcntl.h>
-#include <setjmp.h>
+#define MIN(a, b) \
+	({ \
+		typeof(a) _a = a; \
+		typeof(b) _b = b; \
+		(void)(&_a==&_b); \
+		_a < _b ? _a : _b; \
+	})
 
-#include <SDL.h>
-#include <SDL_thread.h>
+int redoffset  ;
+int greenoffset;
+int blueoffset ;
 
-#define LCD_WIDTH  800
-#define LCD_HEIGHT 480
+int lcd;
+struct fb_var_screeninfo lcdinfo;
+uint8_t *fb;
 
-SDL_Surface *screen = NULL;
+int SCREEN_W, SCREEN_H;
+int CAMERA_W, CAMERA_H;
 
-int shooting(char *yuvdata, int size, unsigned int *fb_mem,
-	SDL_Overlay *bmp, int width, int height)
+int YUV_2_RGB[4][256];
+
+void convert(void)
 {
-	SDL_LockYUVOverlay(bmp);
-	memcpy(bmp->pixels[0], yuvdata, size);
-	bmp->pitches[0] = width;
-	SDL_UnlockYUVOverlay(bmp);
+	/*******************************
+	 R = Y + 1.042*(V-128);
+	 G = Y - 0.344*(U-128)-0.714*(V-128);
+	 B = Y + 1.772*(U-128);
+	*******************************/
 
-	SDL_Rect rect;
-	rect.x = (LCD_WIDTH - width) / 2;
-	rect.y = (LCD_HEIGHT - height) / 2;
-	rect.w = width;
-	rect.h = height;
-
-	SDL_DisplayYUVOverlay(bmp, &rect);
-}
-
-
-void show_camfmt(struct v4l2_format *fmt)
-{
-	printf("分辨率: %dx%d\n",
-			fmt->fmt.pix.width,
-			fmt->fmt.pix.height);
-
-	printf("数据采集格式: ");
-	switch(fmt->fmt.pix.pixelformat)
+	for(int i=0; i<256; i++)
 	{
-	case V4L2_PIX_FMT_JPEG:
-		printf("V4L2_PIX_FMT_JPEG\n");
-		break;
-
-	case V4L2_PIX_FMT_MJPEG:
-		printf("V4L2_PIX_FMT_MJPEG\n");
-		break;
-
-	case V4L2_PIX_FMT_YUYV:
-		printf("V4L2_PIX_FMT_YUYV\n");
+		YUV_2_RGB[0][i] = 1.04200 * (i-128);
+		YUV_2_RGB[1][i] = 0.34414 * (i-128);
+		YUV_2_RGB[2][i] = 0.71414 * (i-128);
+		YUV_2_RGB[3][i] = 1.77200 * (i-128);
 	}
 }
 
-void quit_safely(int sig)
+void display(uint8_t *yuv)
 {
-	SDL_FreeSurface(screen);
+	static uint32_t shown = 0;
 
-	SDL_Quit();
+	int R0, G0, B0;
+	int R1, G1, B1;	
+
+	uint8_t *Y0, *U;
+	uint8_t *Y1, *V;
+
+	int w = MIN(SCREEN_W, CAMERA_W);
+	int h = MIN(SCREEN_H, CAMERA_H);
+
+	// 画显存之前，先把LCD移动到不可见区域
+	lcdinfo.xoffset = 0;
+	lcdinfo.yoffset = 480 * ((shown+1)%2);
+	ioctl(lcd, FBIOPAN_DISPLAY, &lcdinfo);
+
+	uint8_t *fbtmp = fb;
+	fbtmp += (shown%2) * SCREENSIZE;
+
+	int yuv_offset, lcd_offset;
+	for(int y=0; y<h; y++)
+	{
+		for(int x=0; x<w; x+=2)
+		{
+			yuv_offset = ( CAMERA_W*y + x ) * 2;
+			lcd_offset = ( SCREEN_W*y + x ) * 4;
+			
+			Y0 = yuv + yuv_offset + 0;
+			U  = yuv + yuv_offset + 1;
+			Y1 = yuv + yuv_offset + 2;
+			V  = yuv + yuv_offset + 3;
+
+			R0 = *Y0 + YUV_2_RGB[0][*V];
+			G0 = *Y0 - YUV_2_RGB[1][*U] - YUV_2_RGB[2][*V];
+			B0 = *Y0 + YUV_2_RGB[3][*U];
+			R1 = *Y1 + YUV_2_RGB[0][*V];
+			G1 = *Y1 - YUV_2_RGB[1][*U] - YUV_2_RGB[2][*V];
+			B1 = *Y1 + YUV_2_RGB[3][*U];
+
+			R0 = R0>255 ? 255 : (R0<0 ? 0 : R0);
+			G0 = G0>255 ? 255 : (G0<0 ? 0 : G0);
+			B0 = B0>255 ? 255 : (B0<0 ? 0 : B0);
+			R1 = R1>255 ? 255 : (R1<0 ? 0 : R1);
+			G1 = G1>255 ? 255 : (G1<0 ? 0 : G1);
+			B1 = B1>255 ? 255 : (B1<0 ? 0 : B1);
+
+			*(fbtmp + lcd_offset + redoffset  +0) = (uint8_t)R0;
+			*(fbtmp + lcd_offset + greenoffset+0) = (uint8_t)G0;
+			*(fbtmp + lcd_offset + blueoffset +0) = (uint8_t)B0;
+			*(fbtmp + lcd_offset + redoffset  +4) = (uint8_t)R1;
+			*(fbtmp + lcd_offset + greenoffset+4) = (uint8_t)G1;
+			*(fbtmp + lcd_offset + blueoffset +4) = (uint8_t)B1;
+		}
+	}
+	shown++;
 }
 
 int main(int argc, char const *argv[])
 {
-	signal(SIGINT, quit_safely);
-
 	// 打开LCD设备
-	int lcd = open("/dev/fb0", O_RDWR);
+	lcd = open("/dev/fb0", O_RDWR);
 	if(lcd == -1)
 	{
 		perror("open \"/dev/fb0\" failed");
@@ -84,103 +110,61 @@ int main(int argc, char const *argv[])
 	}
 
 	// 获取LCD显示器的设备参数
-	struct fb_var_screeninfo lcdinfo;
 	ioctl(lcd, FBIOGET_VSCREENINFO, &lcdinfo);
 
+	SCREEN_W = lcdinfo.xres;
+	SCREEN_H = lcdinfo.yres;
+
 	// 申请一块适当跟LCD尺寸一样大小的显存
-	unsigned int *fb_mem = mmap(NULL, lcdinfo.xres * lcdinfo.yres * lcdinfo.bits_per_pixel/8,
+	//uint8_t *fb = mmap(NULL, lcdinfo.xres* lcdinfo.yres* lcdinfo.bits_per_pixel/8,
+	fb = mmap(NULL, 2*lcdinfo.xres* lcdinfo.yres* lcdinfo.bits_per_pixel/8,
 				    PROT_READ | PROT_WRITE, MAP_SHARED, lcd, 0);
-	if(fb_mem == MAP_FAILED)
+	if(fb == MAP_FAILED)
 	{
 		perror("mmap failed");
 		exit(0);
 	}
 
 	// 将屏幕刷成黑色
-	unsigned long black = 0x0;
-	unsigned int i;
-	for(i=0; i<lcdinfo.xres * lcdinfo.yres; i++)
-	{
-		memcpy(fb_mem+i, &black, sizeof(unsigned long));
-	}
+	bzero(fb, 2 * lcdinfo.xres * lcdinfo.yres * 4);
+
+	// 获取RGB偏移量
+	redoffset  = lcdinfo.red.offset/8;
+	greenoffset= lcdinfo.green.offset/8;
+	blueoffset = lcdinfo.blue.offset/8;
+
+	lcdinfo.xoffset = 0;
+	lcdinfo.yoffset = 0;
+	ioctl(lcd, FBIOPAN_DISPLAY, &lcdinfo);
+
 
 	// ************************************************** //
 
 	// 打开摄像头设备文件
-	int cam_fd = open("/dev/video0",O_RDWR);
-	if(cam_fd == -1)
+	int camfd = open(argv[1],O_RDWR);
+	if(camfd == -1)
 	{
-		perror("open \"/dev/video7\" failed");
+		perror("open \"/dev/videoN\" failed");
 		exit(0);
 	}
 
-	// 获取摄像头当前的采集格式
-	struct v4l2_format *fmt = calloc(1, sizeof(*fmt));
-	fmt->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	printf("\n摄像头的基本参数：\n");
+	get_camcap(camfd);
 
 	printf("默认摄像头数据采集格式：\n");
-	ioctl(cam_fd, VIDIOC_G_FMT, fmt);
-	show_camfmt(fmt);
+	get_camfmt(camfd);
 
-
-	// 获取摄像头所支持的所有格式
-	struct v4l2_fmtdesc *a = calloc(1, sizeof(*a));
-	a->index = 0;
-	a->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-	int ret;
-	char formats[5][16]={0};
 	printf("\n摄像头所支持的视频采集格式：\n");
-	while((ret=ioctl(cam_fd, VIDIOC_ENUM_FMT, a)) == 0)
-	{
-		printf("[%d]", a->index);
-
-		sprintf(formats[a->index]+0, "%c", (a->pixelformat >> 8*0) & 0xFF);
-		sprintf(formats[a->index]+1, "%c", (a->pixelformat >> 8*1) & 0xFF);
-		sprintf(formats[a->index]+2, "%c", (a->pixelformat >> 8*2) & 0xFF);
-		sprintf(formats[a->index]+3, "%c", (a->pixelformat >> 8*3) & 0xFF);
-
-		printf("像素格式: \"%s\", ", formats[a->index]);
-		a->index++;
-
-		printf("具体描述: %s\n", a->description);
-	}
-
-
-	printf("\n请选择采集格式: \n");
-
-	int choice;
-	scanf("%d", &choice);
+	get_caminfo(camfd);
 
 	// 配置摄像头的采集格式
-	bzero(fmt, sizeof(*fmt));
-	fmt->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	fmt->fmt.pix.width = lcdinfo.xres;
-	fmt->fmt.pix.height = lcdinfo.yres;
-	fmt->fmt.pix.field = V4L2_FIELD_INTERLACED;
-
-	if(!strcmp(formats[choice], "JPEG")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_JPEG;
-	if(!strcmp(formats[choice], "YUYV")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
-	if(!strcmp(formats[choice], "YVYU")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_YVYU;
-	if(!strcmp(formats[choice], "YYUV")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_YYUV;
-	if(!strcmp(formats[choice], "UYVY")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_UYVY;
-	if(!strcmp(formats[choice], "MJPG")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-	if(!strcmp(formats[choice], "MPEG")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_MPEG;
-	if(!strcmp(formats[choice], "H264")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_H264;
-	if(!strcmp(formats[choice], "H263")) fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_H263;
-
-	if(ioctl(cam_fd, VIDIOC_S_FMT, fmt) < 0)
-	{
-		printf("对不起！不支持所选格式，将采用默认格式。\n");
-	}
-
-	// 再次获取配置后的摄像头的参数
-	bzero(fmt, sizeof(*fmt));
-	fmt->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	ioctl(cam_fd, VIDIOC_G_FMT, fmt);
+	set_camfmt(camfd);
 
 	printf("当前数据采集格式：\n");
-	show_camfmt(fmt);
+	get_camfmt(camfd);
+
+	CAMERA_W = fmt.fmt.pix.width;
+	CAMERA_H = fmt.fmt.pix.height;
 
 	// 设置即将要申请的摄像头缓存的参数
 	int nbuf = 3;
@@ -192,61 +176,52 @@ int main(int argc, char const *argv[])
 	reqbuf.count = nbuf;
 
 	// 使用该参数reqbuf来申请缓存
-	ioctl(cam_fd, VIDIOC_REQBUFS, &reqbuf);
+	ioctl(camfd, VIDIOC_REQBUFS, &reqbuf);
 
 	// 根据刚刚设置的reqbuf.count的值，来定义相应数量的struct v4l2_buffer
 	// 每一个struct v4l2_buffer对应内核摄像头驱动中的一个缓存
 	struct v4l2_buffer buffer[nbuf];
 	int length[nbuf];
-	unsigned char *start[nbuf];
+	uint8_t *start[nbuf];
 
-	for(i=0; i<nbuf; i++)
+	for(int i=0; i<nbuf; i++)
 	{
 		bzero(&buffer[i], sizeof(buffer[i]));
 		buffer[i].type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 		buffer[i].memory = V4L2_MEMORY_MMAP;
 		buffer[i].index = i;
-		ioctl(cam_fd, VIDIOC_QUERYBUF, &buffer[i]);
+		ioctl(camfd, VIDIOC_QUERYBUF, &buffer[i]);
 
 		length[i] = buffer[i].length;
 		start[i] = mmap(NULL, buffer[i].length,	PROT_READ | PROT_WRITE,
-				  MAP_SHARED,	cam_fd, buffer[i].m.offset);
+				  MAP_SHARED,	camfd, buffer[i].m.offset);
 
-		ioctl(cam_fd , VIDIOC_QBUF, &buffer[i]);
+		ioctl(camfd , VIDIOC_QBUF, &buffer[i]);
 	}
 
 	// 启动摄像头数据采集
 	enum v4l2_buf_type vtype= V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	ioctl(cam_fd, VIDIOC_STREAMON, &vtype);
+	ioctl(camfd, VIDIOC_STREAMON, &vtype);
 
 	struct v4l2_buffer v4lbuf;
 	bzero(&v4lbuf, sizeof(v4lbuf));
 	v4lbuf.type  = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	v4lbuf.memory= V4L2_MEMORY_MMAP;
 
-	// *********** 设置SDL，为显示视频做准备 **************** //
-	SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_TIMER);
-
-	SDL_Overlay *bmp    = NULL;
-	screen = SDL_SetVideoMode(LCD_WIDTH, LCD_HEIGHT, 0, 0);
-	bmp    = SDL_CreateYUVOverlay(fmt->fmt.pix.width, 
-		                          fmt->fmt.pix.height,
-								  SDL_YUY2_OVERLAY, screen);
-	// ****************************************************** //
-
-	i = 0;
+	// 准备好YUV-RGB映射表
+	convert();
+	int i=0;
 	while(1)
 	{
 		// 从队列中取出填满数据的缓存
 		v4lbuf.index = i%nbuf;
-		ioctl(cam_fd , VIDIOC_DQBUF, &v4lbuf); // VIDIOC_DQBUF在摄像头没数据的时候会阻塞
+		ioctl(camfd , VIDIOC_DQBUF, &v4lbuf);
 
-		shooting(start[i%nbuf], length[i%nbuf], fb_mem,
-			bmp, fmt->fmt.pix.width, fmt->fmt.pix.height);
+		display(start[i%nbuf]);
 
 	 	// 将已经读取过数据的缓存块重新置入队列中 
 		v4lbuf.index = i%nbuf;
-		ioctl(cam_fd , VIDIOC_QBUF, &v4lbuf);
+		ioctl(camfd , VIDIOC_QBUF, &v4lbuf);
 
 		i++;
 	}
