@@ -21,23 +21,42 @@ uint8_t *fb;
 int SCREEN_W, SCREEN_H;
 int CAMERA_W, CAMERA_H;
 
-int YUV_2_RGB[4][256];
+int R[256][256];
+int G[256][256][256];
+int B[256][256];
 
-void convert(void)
+sem_t s;
+
+void *convert(void *arg)
 {
 	/*******************************
 	 R = Y + 1.042*(V-128);
 	 G = Y - 0.344*(U-128)-0.714*(V-128);
 	 B = Y + 1.772*(U-128);
 	*******************************/
+	pthread_detach(pthread_self());
 
 	for(int i=0; i<256; i++)
 	{
-		YUV_2_RGB[0][i] = 1.04200 * (i-128);
-		YUV_2_RGB[1][i] = 0.34414 * (i-128);
-		YUV_2_RGB[2][i] = 0.71414 * (i-128);
-		YUV_2_RGB[3][i] = 1.77200 * (i-128);
+		for(int j=0; j<256; j++)
+		{
+			R[i][j] = i + 1.042*(j-128);
+			R[i][j] = R[i][j]>255 ? 255 : R[i][j];
+			R[i][j] = R[i][j]<0   ? 0   : R[i][j];
+
+			B[i][j] = i + 1.772*(j-128);
+			B[i][j] = B[i][j]>255 ? 255 : B[i][j];
+			B[i][j] = B[i][j]<0   ? 0   : B[i][j];
+
+			for(int k=0; k<256; k++)
+			{
+				G[i][j][k] = i + 0.344*(j-128)-0.714*(k-128);
+				G[i][j][k] = G[i][j][k]>255 ? 255 : G[i][j][k];
+				G[i][j][k] = G[i][j][k]<0   ? 0   : G[i][j][k];
+			}
+		}
 	}
+	sem_post(&s);
 }
 
 void display(uint8_t *yuv)
@@ -47,8 +66,8 @@ void display(uint8_t *yuv)
 	int R0, G0, B0;
 	int R1, G1, B1;	
 
-	uint8_t *Y0, *U;
-	uint8_t *Y1, *V;
+	uint8_t Y0, U;
+	uint8_t Y1, V;
 
 	int w = MIN(SCREEN_W, CAMERA_W);
 	int h = MIN(SCREEN_H, CAMERA_H);
@@ -69,38 +88,37 @@ void display(uint8_t *yuv)
 			yuv_offset = ( CAMERA_W*y + x ) * 2;
 			lcd_offset = ( SCREEN_W*y + x ) * 4;
 			
-			Y0 = yuv + yuv_offset + 0;
-			U  = yuv + yuv_offset + 1;
-			Y1 = yuv + yuv_offset + 2;
-			V  = yuv + yuv_offset + 3;
+			Y0 = *(yuv + yuv_offset + 0);
+			U  = *(yuv + yuv_offset + 1);
+			Y1 = *(yuv + yuv_offset + 2);
+			V  = *(yuv + yuv_offset + 3);
 
-			R0 = *Y0 + YUV_2_RGB[0][*V];
-			G0 = *Y0 - YUV_2_RGB[1][*U] - YUV_2_RGB[2][*V];
-			B0 = *Y0 + YUV_2_RGB[3][*U];
-			R1 = *Y1 + YUV_2_RGB[0][*V];
-			G1 = *Y1 - YUV_2_RGB[1][*U] - YUV_2_RGB[2][*V];
-			B1 = *Y1 + YUV_2_RGB[3][*U];
+			*(fbtmp + lcd_offset + redoffset  +0) = R[Y0][V];
+			*(fbtmp + lcd_offset + greenoffset+0) = G[Y0][U][V];
+			*(fbtmp + lcd_offset + blueoffset +0) = B[Y0][U];
 
-			R0 = R0>255 ? 255 : (R0<0 ? 0 : R0);
-			G0 = G0>255 ? 255 : (G0<0 ? 0 : G0);
-			B0 = B0>255 ? 255 : (B0<0 ? 0 : B0);
-			R1 = R1>255 ? 255 : (R1<0 ? 0 : R1);
-			G1 = G1>255 ? 255 : (G1<0 ? 0 : G1);
-			B1 = B1>255 ? 255 : (B1<0 ? 0 : B1);
-
-			*(fbtmp + lcd_offset + redoffset  +0) = (uint8_t)R0;
-			*(fbtmp + lcd_offset + greenoffset+0) = (uint8_t)G0;
-			*(fbtmp + lcd_offset + blueoffset +0) = (uint8_t)B0;
-			*(fbtmp + lcd_offset + redoffset  +4) = (uint8_t)R1;
-			*(fbtmp + lcd_offset + greenoffset+4) = (uint8_t)G1;
-			*(fbtmp + lcd_offset + blueoffset +4) = (uint8_t)B1;
+			*(fbtmp + lcd_offset + redoffset  +4) = R[Y1][V];
+			*(fbtmp + lcd_offset + greenoffset+4) = G[Y1][U][V];
+			*(fbtmp + lcd_offset + blueoffset +4) = B[Y1][U];
 		}
 	}
 	shown++;
 }
 
-int main(int argc, char const *argv[])
+void usage(int argc, char *argv[])
 {
+	if(argc != 2)
+	{
+		printf("Usage: %s </dev/videoX>\n", argv[0]);
+		exit(0);
+	}
+}
+
+int main(int argc, char *argv[])
+{
+	usage(argc, argv);
+	sem_init(&s, 0, 0);
+
 	// 打开LCD设备
 	lcd = open("/dev/fb0", O_RDWR);
 	if(lcd == -1)
@@ -116,7 +134,6 @@ int main(int argc, char const *argv[])
 	SCREEN_H = lcdinfo.yres;
 
 	// 申请一块适当跟LCD尺寸一样大小的显存
-	//uint8_t *fb = mmap(NULL, lcdinfo.xres* lcdinfo.yres* lcdinfo.bits_per_pixel/8,
 	fb = mmap(NULL, 2*lcdinfo.xres* lcdinfo.yres* lcdinfo.bits_per_pixel/8,
 				    PROT_READ | PROT_WRITE, MAP_SHARED, lcd, 0);
 	if(fb == MAP_FAILED)
@@ -139,12 +156,17 @@ int main(int argc, char const *argv[])
 
 
 	// ************************************************** //
+	
+	// 准备好YUV-RGB映射表
+	pthread_t tid;
+	pthread_create(&tid, NULL, convert, NULL);
+
 
 	// 打开摄像头设备文件
 	int camfd = open(argv[1],O_RDWR);
 	if(camfd == -1)
 	{
-		perror("open \"/dev/videoN\" failed");
+		printf("open %s faield: %s\n", argv[1], strerror(errno));
 		exit(0);
 	}
 
@@ -208,8 +230,8 @@ int main(int argc, char const *argv[])
 	v4lbuf.type  = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	v4lbuf.memory= V4L2_MEMORY_MMAP;
 
-	// 准备好YUV-RGB映射表
-	convert();
+	// 开始抓取摄像头数据并在屏幕播放视频
+	sem_wait(&s);
 	int i=0;
 	while(1)
 	{
