@@ -1,18 +1,5 @@
-/////////////////////////////////////////////////////
-//
-//  Copyright(C), 2011-2018, GEC Tech. Co., Ltd.
-//  File name: v4l2_yuv.c
-//
-//  Description: 摄像头图像处理
-//  Author: 林世霖
-//  微信公众号：秘籍酷
-//
-//  GitHub: github.com/vincent040   
-//  Bug Report: 2437231462@qq.com
-//
-//////////////////////////////////////////////////////
-
 #include "head.h"
+#include "jpeglib.h"
 
 #define SCREENSIZE 800*480*4
 
@@ -39,7 +26,10 @@ int R[256][256];
 int G[256][256][256];
 int B[256][256];
 
-sem_t s;
+sem_t s, ss;
+
+uint8_t *yuvdata;
+int len;
 
 void *convert(void *arg)
 {
@@ -70,15 +60,11 @@ void *convert(void *arg)
 			}
 		}
 	}
-	sem_post(&s);
 }
 
 void display(uint8_t *yuv)
 {
 	static uint32_t shown = 0;
-
-	int R0, G0, B0;
-	int R1, G1, B1;	
 
 	uint8_t Y0, U;
 	uint8_t Y1, V;
@@ -94,29 +80,127 @@ void display(uint8_t *yuv)
 	uint8_t *fbtmp = fb;
 	fbtmp += (shown%2) * SCREENSIZE;
 
-	int yuv_offset, lcd_offset;
+	int yuv_offset, rgb_offset;
 	for(int y=0; y<h; y++)
 	{
 		for(int x=0; x<w; x+=2)
 		{
 			yuv_offset = ( CAMERA_W*y + x ) * 2;
-			lcd_offset = ( SCREEN_W*y + x ) * 4;
+			rgb_offset = ( SCREEN_W*y + x ) * 4;
 			
 			Y0 = *(yuv + yuv_offset + 0);
 			U  = *(yuv + yuv_offset + 1);
 			Y1 = *(yuv + yuv_offset + 2);
 			V  = *(yuv + yuv_offset + 3);
 
-			*(fbtmp + lcd_offset + redoffset  +0) = R[Y0][V];
-			*(fbtmp + lcd_offset + greenoffset+0) = G[Y0][U][V];
-			*(fbtmp + lcd_offset + blueoffset +0) = B[Y0][U];
+			*(fbtmp + rgb_offset + redoffset  +0) = R[Y0][V];
+			*(fbtmp + rgb_offset + greenoffset+0) = G[Y0][U][V];
+			*(fbtmp + rgb_offset + blueoffset +0) = B[Y0][U];
 
-			*(fbtmp + lcd_offset + redoffset  +4) = R[Y1][V];
-			*(fbtmp + lcd_offset + greenoffset+4) = G[Y1][U][V];
-			*(fbtmp + lcd_offset + blueoffset +4) = B[Y1][U];
+			*(fbtmp + rgb_offset + redoffset  +4) = R[Y1][V];
+			*(fbtmp + rgb_offset + greenoffset+4) = G[Y1][U][V];
+			*(fbtmp + rgb_offset + blueoffset +4) = B[Y1][U];
 		}
 	}
 	shown++;
+}
+
+void yuv2jpg(uint8_t *yuv, char **jpgname)
+{
+	// 准备RGB数据
+	uint8_t *rgbdata = calloc(1, CAMERA_W * CAMERA_H * 3);
+
+	uint8_t Y0, U;
+	uint8_t Y1, V;
+
+	int yuv_offset, rgb_offset;
+	for(int i=0; i<CAMERA_H; i++)
+	{
+		for(int j=0; j<CAMERA_W; j+=2)
+		{
+			yuv_offset = ( CAMERA_W*i + j ) * 2;
+			rgb_offset = ( CAMERA_W*i + j ) * 3;
+			
+			Y0 = *(yuv + yuv_offset + 0);
+			U  = *(yuv + yuv_offset + 1);
+			Y1 = *(yuv + yuv_offset + 2);
+			V  = *(yuv + yuv_offset + 3);
+
+			*(rgbdata + rgb_offset + 0) = R[Y0][V];
+			*(rgbdata + rgb_offset + 1) = G[Y0][U][V];
+			*(rgbdata + rgb_offset + 2) = B[Y0][U];
+
+			*(rgbdata + rgb_offset + 3) = R[Y1][V];
+			*(rgbdata + rgb_offset + 4) = G[Y1][U][V];
+			*(rgbdata + rgb_offset + 5) = B[Y1][U];
+		}
+	}
+
+	struct jpeg_compress_struct cinfo;
+	struct jpeg_error_mgr jerr;
+
+	cinfo.err = jpeg_std_error(&jerr);
+	jpeg_create_compress(&cinfo);
+
+
+	// 准备图片文件
+	*jpgname = calloc(1, 20);
+	snprintf(*jpgname, 20, "%d.jpg", time(NULL));
+
+	FILE *fp = fopen(*jpgname, "w");
+	if(fp == NULL)
+	{
+		printf("创建文件[%s]失败:%s\n", *jpgname, strerror(errno));
+		return;
+	}
+
+	jpeg_stdio_dest(&cinfo, fp);
+
+	cinfo.image_width  = CAMERA_W;
+	cinfo.image_height = CAMERA_H;
+	cinfo.input_components = 3;
+	cinfo.in_color_space   = JCS_RGB;
+
+	jpeg_set_defaults(&cinfo);
+	jpeg_set_quality(&cinfo, 80, TRUE);
+
+	jpeg_start_compress(&cinfo, TRUE);
+
+	int row_stride = CAMERA_W*3;
+	JSAMPROW row_pointer[1];
+
+	// 开始编码，并将jpg数据存入指定的图片文件中
+	while(cinfo.next_scanline < cinfo.image_height)
+	{
+		row_pointer[0] = rgbdata + cinfo.next_scanline * CAMERA_W * 3;
+		jpeg_write_scanlines(&cinfo, row_pointer, 1);
+	}
+
+	jpeg_finish_compress(&cinfo);
+	jpeg_destroy_compress(&cinfo);
+
+	free(rgbdata);
+	fclose(fp);
+}
+
+void *snap(void *arg)
+{
+	while(1)
+	{
+		// 按回车拍照
+		getchar();
+		sem_wait(&ss);
+		
+		char *jpgname = NULL;
+		yuv2jpg(yuvdata, &jpgname);
+
+		sem_post(&ss);
+
+		char cmd[200] = {0};
+		snprintf(cmd, 200, "tftp 192.168.27.2 -p -r %s", jpgname);
+		printf("%s\n", cmd);
+		system(cmd);
+	}
 }
 
 void usage(int argc, char *argv[])
@@ -132,6 +216,7 @@ int main(int argc, char *argv[])
 {
 	usage(argc, argv);
 	sem_init(&s, 0, 0);
+	sem_init(&ss, 0, 0);
 
 	// 打开LCD设备
 	lcd = open("/dev/fb0", O_RDWR);
@@ -147,7 +232,8 @@ int main(int argc, char *argv[])
 	SCREEN_W = lcdinfo.xres;
 	SCREEN_H = lcdinfo.yres;
 
-	fb = mmap(NULL, lcdinfo.xres* lcdinfo.yres_virtual* lcdinfo.bits_per_pixel/8,
+	// 申请一块适当跟LCD尺寸一样大小的显存
+	fb = mmap(NULL, 2*lcdinfo.xres* lcdinfo.yres* lcdinfo.bits_per_pixel/8,
 				    PROT_READ | PROT_WRITE, MAP_SHARED, lcd, 0);
 	if(fb == MAP_FAILED)
 	{
@@ -155,7 +241,7 @@ int main(int argc, char *argv[])
 		exit(0);
 	}
 
-	// 清屏
+	// 将屏幕刷成黑色
 	bzero(fb, 2 * lcdinfo.xres * lcdinfo.yres * 4);
 
 	// 获取RGB偏移量
@@ -185,10 +271,10 @@ int main(int argc, char *argv[])
 
 	printf("\n摄像头的基本参数：\n");
 	get_camcap(camfd);
-	get_camfmt(camfd);
 	get_caminfo(camfd);
 
 	// 配置摄像头的采集格式
+	printf("当前数据采集格式：\n");
 	set_camfmt(camfd, "YUYV");
 	get_camfmt(camfd);
 
@@ -237,8 +323,10 @@ int main(int argc, char *argv[])
 	v4lbuf.type  = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	v4lbuf.memory= V4L2_MEMORY_MMAP;
 
+	// 按下回车键抓拍
+	pthread_create(&tid, NULL, snap, NULL);
+
 	// 开始抓取摄像头数据并在屏幕播放视频
-	sem_wait(&s);
 	int i=0;
 	while(1)
 	{
@@ -246,7 +334,10 @@ int main(int argc, char *argv[])
 		v4lbuf.index = i%nbuf;
 		ioctl(camfd , VIDIOC_DQBUF, &v4lbuf);
 
-		display(start[i%nbuf]);
+		sem_post(&ss);
+		len = length[i%nbuf];
+		display(yuvdata=start[i%nbuf]);
+		sem_wait(&ss);
 
 	 	// 将已经读取过数据的缓存块重新置入队列中 
 		v4lbuf.index = i%nbuf;
