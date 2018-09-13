@@ -1,7 +1,7 @@
 /////////////////////////////////////////////////////
 //
 //  Copyright(C), 2011-2018, GEC Tech. Co., Ltd.
-//  File name: v4l2_yuv.c
+//  File name: videostream_yuv.c
 //
 //  Description: 摄像头图像处理
 //  Author: 林世霖
