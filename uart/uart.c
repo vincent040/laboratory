@@ -22,13 +22,17 @@
 #include <errno.h>
 
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/select.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 #include <dirent.h>
+
+sem_t s;
 
 #define BUFSIZE 1024
 
@@ -53,7 +57,7 @@ void init_tty(int fd)
 	// 非经典模式（）
 	cfg.c_lflag &= ~ICANON;
 
-	cfg.c_cc[VMIN]  = 5;
+	cfg.c_cc[VMIN]  = 1; // 数据块尺寸（字节）
 	cfg.c_cc[VTIME] = 0; // 单位：0.1秒
 
 
@@ -84,18 +88,6 @@ void *routine(void *arg)
 {
 	int fd_recv = *(int *)arg;
 
-	struct termios newcfg, oldcfg;	
-	bzero(&newcfg, sizeof(newcfg));
-	bzero(&oldcfg, sizeof(oldcfg));
-
-	tcgetattr(fd_recv, &oldcfg);
-	newcfg = oldcfg;
-
-	newcfg.c_cflag |= PARENB;
-
-	//tcsetattr(fd_recv, TCSANOW, &newcfg);
-
-
 	char *buf= calloc(1, BUFSIZE);
 	int n;
 	while(1)
@@ -115,8 +107,9 @@ void *routine(void *arg)
 		{
 			perror("read failed");
 		}
-	}
 
+		sem_post(&s);
+	}
 }
 
 char *menu(void)
@@ -142,6 +135,8 @@ char *menu(void)
 
 int main(void)
 {
+	sem_init(&s, 0, 0);
+
 	pthread_t t;
 	//pthread_create(&t, NULL, count, NULL);
 
@@ -149,10 +144,10 @@ int main(void)
 	char *tty_send;
 	char *tty_recv;
 
-	printf("请选择发送端串口:\n");
+	//printf("请选择发送端串口:\n");
 	//tty_send = menu();
 	tty_send = "/dev/ttySAC1";
-	printf("请选择接收端串口:\n");
+	//printf("请选择接收端串口:\n");
 	//tty_recv = menu();
 	tty_recv = "/dev/ttySAC2";
 
@@ -182,26 +177,21 @@ int main(void)
 
 	// ============ 主线程发送串口信息 ============ //
 
-	struct termios newcfg, oldcfg;	
-	bzero(&newcfg, sizeof(newcfg));
-	bzero(&oldcfg, sizeof(oldcfg));
-
-	tcgetattr(fd_send, &oldcfg);
-	newcfg = oldcfg;
-
-	newcfg.c_cflag |= PARENB;
-
-	//tcsetattr(fd_send, TCSANOW, &newcfg);
-
-	char *buf = calloc(1, BUFSIZE);
+	int n;
 	while(1)
 	{
-		bzero(buf, BUFSIZE);
-		fgets(buf, BUFSIZE, stdin);
+		printf("\n请输入要发送的字节数:");
+		scanf("%d", &n);
 
-		write(fd_send, buf, strlen(buf));
-		//write(fd_send, "a", 1);
-		//sleep(1);
+		if(n <= 0)
+			continue;
+
+		for(int i=0; i<n; i++)
+		{
+			write(fd_send, "x", 1);
+		}
+
+		sem_wait(&s);
 	}
 
 	return 0;
