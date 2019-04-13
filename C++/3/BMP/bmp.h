@@ -11,6 +11,7 @@ class BMP
 public:
     BMP();
     BMP(const char *bmpfile);
+    BMP(const BMP &r);
     ~BMP();
 
     void showName(); // 名字

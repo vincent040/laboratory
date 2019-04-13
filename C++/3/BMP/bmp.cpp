@@ -40,6 +40,20 @@ BMP::BMP(const char *file)
     bmp.read(rgb, size);
 }
 
+BMP::BMP(const BMP &r)
+{
+    name = r.name;
+    _info = r._info;
+
+    int size = _info.height * _info.width * _info.pixel_size;
+    rgb = (char *)malloc(size);
+    if(rgb == NULL)
+        abort();
+
+    // 深拷贝
+    memcpy(rgb, r.rgb, size);
+}
+
 BMP::~BMP()
 {
     free(rgb);

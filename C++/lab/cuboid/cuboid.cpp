@@ -3,7 +3,6 @@
 // 常成员数据必须在初始化时显式地赋值
 cuboid::cuboid(int l, int w, int h):_length(l), _width(w), _height(h)
 {
-    _length = 200;
     _color = "red";
     p = &_color;
 }

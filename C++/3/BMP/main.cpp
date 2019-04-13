@@ -16,6 +16,7 @@ int main(void)
     cout << endl << "复制这张图片到另一个对象中" << endl;
     BMP b;
     b = *a;
+    BMP c(*a);
 
     cout << "删除原来的图片对象..." << endl;
     delete a;
@@ -25,6 +26,13 @@ int main(void)
     b.showInfo();
 
     cout << "图片大小：" << b.totalsize() << "(字节)" << endl;
+
+    cout << endl << "显示复制品的相关信息：" << endl;
+    c.showName();
+    c.showInfo();
+
+    cout << "图片大小：" << c.totalsize() << "(字节)" << endl;
+
 
     return 0;
 }
