@@ -122,7 +122,7 @@ linktree avl_remove(linktree root, tn_datatype data)
 
 	if(height(root->lchild) - height(root->rchild) == 2)
 	{
-		if(height(root->lchild->rchild)-height(root->lchild->rchild) == 1)
+		if(height(root->lchild->rchild)-height(root->lchild->lchild) == 1)
 			root = avl_rotate_leftright(root);
 		else
 			root = avl_rotate_right(root);
