@@ -1,13 +1,13 @@
 CC = gcc
 CFLAGS = -O0 -Wall -g -lpthread
 
-copy:copy.c thread_pool.c
+copy.elf:copy.c thread_pool.c
 	$(CC) $^ -o $@ $(CFLAGS)
 
-debug:copy.c thread_pool.c
+debug.elf:copy.c thread_pool.c
 	$(CC) $^ -o $@ $(CFLAGS) -DDEBUG
 
 clean:
-	$(RM) .*.sw? copy debug *.o
+	$(RM) .*.sw? copy.elf debug.elf *.o
 
 .PHONY:all clean
