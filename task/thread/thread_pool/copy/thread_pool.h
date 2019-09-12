@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <pthread.h>
 
-#define MAX_WAITING_TASKS	1000
+#define MAX_WAITING_TASKS	2000
 #define MAX_ACTIVE_THREADS	20
 
 #define BUFSIZE			100
@@ -19,7 +19,7 @@
 
 struct task
 {
-	void *(*do_task)(void *arg);
+	void *(*task)(void *arg);
 	void *arg;
 
 	struct task *next;

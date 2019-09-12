@@ -1,0 +1,37 @@
+#!/bin/bash
+
+if [ $# -eq 0 ]
+then
+	vi
+	exit
+fi
+
+if [ $# -ge 2 ]
+then
+	echo "参数太多了！"
+	exit
+fi
+
+sample="////////////////////////////////////////////////\n//\n//  Copyright(C), 广州粤嵌通信科技股份有限公司\n//\n//  作者: Vincent Lin (林世霖)\n//\n//  微信公众号: 秘籍酷\n//  技术交流群: 260492823（QQ群）\n//  GitHub链接: https://github.com/vincent040\n//\n//  描述:\n//\n////////////////////////////////////////////////\n\n#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <unistd.h>\n#include <string.h>\n#include <strings.h>\n#include <errno.h>\n#include <sys/stat.h>\n#include <sys/types.h>\n#include <sys/wait.h>\n#include <fcntl.h>\n\nint main(int argc, char **argv)\n{\n\n\treturn 0;\n}\n"
+
+
+if [ -e $1 ] # 文件已存在，一律直接打开不作任何处理
+then
+	vi $1
+	exit
+else
+	suffix=`echo "$1" | sed 's/^.*\./\./'`
+
+	# 如果是C语言程序，搞个模板开始编辑
+	if [ $suffix = ".c" ]
+	then
+		echo -e $sample > $1
+		vi $1 +29
+		exit
+
+	# 否则，直接编辑空文件
+	else
+		vi $1
+		exit
+	fi
+fi

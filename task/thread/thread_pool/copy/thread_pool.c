@@ -1,5 +1,7 @@
 #include "thread_pool.h"
 
+int nn;
+
 void handler(void *arg)
 {
 	pthread_mutex_unlock((pthread_mutex_t *)arg);
@@ -53,13 +55,15 @@ void *routine(void *arg)
 		pool->task_list->next = p->next;
 		pool->waiting_tasks--;
 
+		printf("消费任务，剩余任务 ===> %d/%d\n", pool->waiting_tasks, ++nn);
+
 		//================================================//
 		pthread_mutex_unlock(&pool->lock);
 		pthread_cleanup_pop(0);
 		//================================================//
 
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-		(p->do_task)(p->arg);
+		(p->task)(p->arg);
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 		free(p);
@@ -110,7 +114,7 @@ bool init_pool(thread_pool *pool, unsigned int threads_number)
 }
 
 bool add_task(thread_pool *pool,
-	      void *(*do_task)(void *arg), void *arg)
+	      void *(*task)(void *arg), void *arg)
 {
 	struct task *new_task = malloc(sizeof(struct task));
 	if(new_task == NULL)
@@ -118,7 +122,7 @@ bool add_task(thread_pool *pool,
 		perror("allocate memory error");
 		return false;
 	}
-	new_task->do_task = do_task;
+	new_task->task = task;
 	new_task->arg = arg;
 	new_task->next = NULL;
 
@@ -142,6 +146,8 @@ bool add_task(thread_pool *pool,
 
 	tmp->next = new_task;
 	pool->waiting_tasks++;
+
+	printf("投放任务，任务总数:%d\n", pool->waiting_tasks);
 
 	//=========== UNLOCK ============//
 	pthread_mutex_unlock(&pool->lock);

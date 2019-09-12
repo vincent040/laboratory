@@ -42,6 +42,7 @@ void *mytask(void *arg)
 	fd[1] = ((int *)arg)[1];
 
 	copyfile(fd[0], fd[1]);
+	free(arg);
 
 	return NULL;
 }
@@ -49,6 +50,8 @@ void *mytask(void *arg)
 void copydir(thread_pool *pool,
 		const char *dir_src, const char *dir_dst)
 {
+	static int n = 0;
+	printf("copydir: %d\n", ++n);
 	char abs_ori[PATHSIZE] = {0};
 	char abs_src[PATHSIZE] = {0};
 	char abs_dst[PATHSIZE] = {0};
@@ -67,7 +70,6 @@ void copydir(thread_pool *pool,
 	DIR *dp_src;
 	dp_src = opendir(abs_src);
 	
-	int fd[2];
 	struct dirent *ep;
 	struct stat *file_info;
 	while(1)
@@ -100,6 +102,7 @@ void copydir(thread_pool *pool,
 		}
 		else if(S_ISREG(file_info->st_mode))
 		{
+			int *fd = calloc(2, sizeof(int));
 			fd[0] = open(ep->d_name, O_RDONLY);
 	
 			chdir(abs_dst);
@@ -109,13 +112,17 @@ void copydir(thread_pool *pool,
 	
 			add_task(pool, mytask, (void *)fd);
 		}
+		free(file_info);
 	}
 }
 
 int main(int argc, char **argv)
 {
 	if(argc != 3)
+	{
+		printf("用法: %s <源文件> <目标文件>\n", argv[0]);
 		exit(0);
+	}
 
 	// 1, initialize the pool
 	thread_pool *pool = malloc(sizeof(thread_pool));
