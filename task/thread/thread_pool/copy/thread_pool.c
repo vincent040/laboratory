@@ -55,8 +55,6 @@ void *routine(void *arg)
 		pool->task_list->next = p->next;
 		pool->waiting_tasks--;
 
-		printf("消费任务，剩余任务 ===> %d/%d\n", pool->waiting_tasks, ++nn);
-
 		//================================================//
 		pthread_mutex_unlock(&pool->lock);
 		pthread_cleanup_pop(0);
@@ -146,8 +144,6 @@ bool add_task(thread_pool *pool,
 
 	tmp->next = new_task;
 	pool->waiting_tasks++;
-
-	printf("投放任务，任务总数:%d\n", pool->waiting_tasks);
 
 	//=========== UNLOCK ============//
 	pthread_mutex_unlock(&pool->lock);

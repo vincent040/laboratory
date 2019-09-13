@@ -1,3 +1,17 @@
+////////////////////////////////////////////////
+//
+// Copyright(C), 广州粤嵌通信科技股份有限公司
+//
+// 作者: Vincent Lin (林世霖)
+//
+// 微信公众号: 秘籍酷
+// 技术交流群: 260492823（QQ群）
+// GitHub链接: https://github.com/vincent040
+//
+// 描述: 线程池结构体设计及接口
+//
+////////////////////////////////////////////////
+
 #ifndef _THREAD_POOL_H_
 #define _THREAD_POOL_H_
 
@@ -16,7 +30,7 @@
 
 struct task
 {
-	void *(*do_task)(void *arg);
+	void *(*task)(void *arg);
 	void *arg;
 
 	struct task *next;
@@ -40,7 +54,7 @@ typedef struct thread_pool
 
 
 bool init_pool(thread_pool *pool, unsigned int threads_number);
-bool add_task(thread_pool *pool, void *(*do_task)(void *arg), void *task);
+bool add_task(thread_pool *pool, void *(*task)(void *arg), void *arg);
 int  add_thread(thread_pool *pool, unsigned int additional_threads_number);
 int  remove_thread(thread_pool *pool, unsigned int removing_threads_number);
 bool destroy_pool(thread_pool *pool);

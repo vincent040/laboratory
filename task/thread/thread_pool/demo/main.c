@@ -1,8 +1,22 @@
+////////////////////////////////////////////////
+//
+// Copyright(C), 广州粤嵌通信科技股份有限公司
+//
+// 作者: Vincent Lin (林世霖)
+//
+// 微信公众号: 秘籍酷
+// 技术交流群: 260492823（QQ群）
+// GitHub链接: https://github.com/vincent040
+//
+// 描述: 使用线程池拷贝文件或目录
+//
+////////////////////////////////////////////////
+
 #include "thread_pool.h"
 
 void *mytask(void *arg)
 {
-	int n = (int)arg;
+	int n = *(int *)arg;
 
 	printf("[%u][%s] ==> job will be done in %d sec...\n",
 		(unsigned)pthread_self(), __FUNCTION__, n);
@@ -36,9 +50,10 @@ int main(void)
 
 	// 2, throw tasks
 	printf("throwing 3 tasks...\n");
-	add_task(pool, mytask, (void *)(rand()%10));
-	add_task(pool, mytask, (void *)(rand()%10));
-	add_task(pool, mytask, (void *)(rand()%10));
+	int randsom = rand()%10;
+	add_task(pool, mytask, (void *)(&randsom));
+	add_task(pool, mytask, (void *)(&randsom));
+	add_task(pool, mytask, (void *)(&randsom));
 
 	// 3, check active threads number
 	printf("current thread number: %d\n",
@@ -47,8 +62,9 @@ int main(void)
 
 	// 4, throw tasks
 	printf("throwing another 2 tasks...\n");
-	add_task(pool, mytask, (void *)(rand()%10));
-	add_task(pool, mytask, (void *)(rand()%10));
+	randsom = rand()%10;
+	add_task(pool, mytask, (void *)(&randsom));
+	add_task(pool, mytask, (void *)(&randsom));
 
 	// 5, add threads
 	add_thread(pool, 2);

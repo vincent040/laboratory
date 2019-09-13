@@ -42,6 +42,8 @@ void *mytask(void *arg)
 	fd[1] = ((int *)arg)[1];
 
 	copyfile(fd[0], fd[1]);
+	close(fd[0]);
+	close(fd[1]);
 	free(arg);
 
 	return NULL;
@@ -50,8 +52,6 @@ void *mytask(void *arg)
 void copydir(thread_pool *pool,
 		const char *dir_src, const char *dir_dst)
 {
-	static int n = 0;
-	printf("copydir: %d\n", ++n);
 	char abs_ori[PATHSIZE] = {0};
 	char abs_src[PATHSIZE] = {0};
 	char abs_dst[PATHSIZE] = {0};
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 	// 2, throw tasks
 	if(S_ISREG(file_info->st_mode))
 	{
-		int fd[2];
+		int *fd = calloc(2, sizeof(int));
 		fd[0] = open(argv[1], O_RDONLY);
 		fd[1] = open(argv[2], O_CREAT|O_WRONLY|O_TRUNC, 0644);
 		add_task(pool, mytask, (void *)fd);

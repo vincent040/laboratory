@@ -55,6 +55,5 @@ int main(int argc, char **argv)
 	const char *c[] = {"abc", "xy", "aa", "abcdef", "opop", ""};
 	cout << maxn<int>(c, 6) << endl;;
 
-
 	return 0;
 }

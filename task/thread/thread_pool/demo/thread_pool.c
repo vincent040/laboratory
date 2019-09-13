@@ -1,3 +1,23 @@
+
+////////////////////////////////////////////////
+//
+// Copyright(C), 广州粤嵌通信科技股份有限公司
+//
+// 作者: Vincent Lin (林世霖)
+//
+// 微信公众号: 秘籍酷
+// 技术交流群: 260492823（QQ群）
+// GitHub链接: https://github.com/vincent040
+//
+// 描述: 线程池的接口实现
+//       ① 初始化: init_pool()
+//       ② 增加线程: add_thread()
+//       ③ 删减线程: remove_thread()
+//       ④ 投放任务: add_task()
+//       ⑤ 销毁线程池: destroy_pool();
+//
+////////////////////////////////////////////////
+
 #include "thread_pool.h"
 
 void handler(void *arg)
@@ -62,7 +82,7 @@ void *routine(void *arg)
 		//================================================//
 
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-		(p->do_task)(p->arg);
+		(p->task)(p->arg);
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 		free(p);
@@ -113,7 +133,7 @@ bool init_pool(thread_pool *pool, unsigned int threads_number)
 }
 
 bool add_task(thread_pool *pool,
-	      void *(*do_task)(void *arg), void *arg)
+	      void *(*task)(void *arg), void *arg)
 {
 	struct task *new_task = malloc(sizeof(struct task));
 	if(new_task == NULL)
@@ -121,7 +141,7 @@ bool add_task(thread_pool *pool,
 		perror("allocate memory error");
 		return false;
 	}
-	new_task->do_task = do_task;
+	new_task->task = task;
 	new_task->arg = arg;
 	new_task->next = NULL;
 
