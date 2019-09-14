@@ -1,9 +1,9 @@
 SRC = $(wildcard *.cpp)
-ELF = $(SRC:%.cpp=%)
+ELF = $(SRC:%.cpp=%.elf)
 
 all:$(ELF)
 
-$(ELF):%:%.cpp
+$(ELF):%.elf:%.cpp
 	g++ $^ -o $@
 
 
